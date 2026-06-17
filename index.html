@@ -151,6 +151,41 @@
   .legal{margin-top:13px;font-size:12px;color:var(--sub);line-height:1.5;}
   .legal a{color:var(--teal-dark);font-weight:600;}
   @media(max-width:520px){.social{margin-left:0;width:100%;}}
+  .boardtab{position:fixed;right:0;top:42%;transform:translateY(-50%);z-index:50;writing-mode:vertical-rl;
+    background:var(--teal);color:#fff;border:none;border-radius:8px 0 0 8px;padding:13px 7px;font-size:12.5px;
+    font-weight:600;letter-spacing:.05em;cursor:pointer;box-shadow:0 4px 14px rgba(20,40,36,.18);}
+  .boardtab:hover{background:var(--teal-dark);}
+  .boardbackdrop{position:fixed;inset:0;background:rgba(10,20,18,.35);opacity:0;visibility:hidden;transition:opacity .2s;z-index:55;}
+  .boardbackdrop.show{opacity:1;visibility:visible;}
+  .boardpanel{position:fixed;top:0;right:0;height:100%;width:372px;max-width:92vw;background:var(--paper);
+    border-left:1px solid var(--border);z-index:56;transform:translateX(100%);transition:transform .22s ease;
+    display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(20,40,36,.14);}
+  .boardpanel.open{transform:translateX(0);}
+  .bp-head{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;border-bottom:1px solid var(--border);font-weight:700;}
+  .bp-x{border:none;background:none;font-size:23px;line-height:1;color:var(--sub);cursor:pointer;padding:0;}
+  .bp-intro{padding:12px 16px;font-size:12.5px;color:var(--sub);line-height:1.5;}
+  .bp-form{padding:0 16px 13px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--border);}
+  .bp-row{display:flex;gap:8px;}
+  .bp-form select,.bp-form input,.bp-form textarea{font:inherit;width:100%;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--card);color:var(--ink);}
+  .bp-form textarea{resize:vertical;}
+  .bp-hp{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;opacity:0;}
+  .bp-actions{display:flex;align-items:center;gap:10px;}
+  .bp-actions button{background:var(--teal);color:#fff;border:none;border-radius:8px;padding:8px 17px;font-weight:600;cursor:pointer;}
+  .bp-actions button:hover{background:var(--teal-dark);}
+  .bp-status{font-size:12px;}
+  .bp-list{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;}
+  .bp-empty{font-size:13px;color:var(--sub);text-align:center;padding:22px 10px;line-height:1.5;}
+  .bp-item{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--card);}
+  .bp-itop{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+  .bp-chip{font-size:10.5px;font-weight:600;color:#fff;background:var(--teal);border-radius:5px;padding:1px 7px;}
+  .bp-chip.fb{background:var(--plum);}
+  .bp-who{font-size:12px;color:var(--ink);font-weight:600;}
+  .bp-time{font-size:11.5px;color:var(--sub);margin-left:auto;}
+  .bp-msg{font-size:13.5px;line-height:1.5;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
+  .bp-vote{margin-top:8px;border:1px solid var(--border);background:var(--card);color:var(--sub);border-radius:7px;
+    padding:3px 10px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;}
+  .bp-vote:hover{border-color:var(--teal);color:var(--teal-dark);}
+  .bp-vote.voted{color:var(--teal-dark);border-color:var(--teal);background:var(--teal-soft);cursor:default;}
 </style>
 </head>
 <body>
@@ -264,6 +299,27 @@
       </div>
     </div>
   </div>
+
+  <button id="boardTab" class="boardtab" title="Ideas &amp; feedback">Feedback</button>
+  <div id="boardBackdrop" class="boardbackdrop"></div>
+  <aside id="boardPanel" class="boardpanel" aria-hidden="true" aria-label="Ideas and feedback">
+    <div class="bp-head"><span>Ideas &amp; feedback</span><button id="boardClose" class="bp-x" aria-label="Close">&times;</button></div>
+    <div class="bp-intro">Help shape where PlintaScope goes. Request a feature or leave feedback. Your email is required but never shown publicly.</div>
+    <div class="bp-form">
+      <div class="bp-row">
+        <select id="bpType" aria-label="Type">
+          <option value="idea">Feature request</option>
+          <option value="feedback">Feedback</option>
+        </select>
+        <input id="bpName" type="text" placeholder="Name (optional)" maxlength="40" />
+      </div>
+      <input id="bpEmail" type="email" placeholder="Email (required, not shown)" autocomplete="email" />
+      <textarea id="bpMsg" rows="3" placeholder="What would you like to see, or tell us?" maxlength="1000"></textarea>
+      <input id="bpHp" class="bp-hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+      <div class="bp-actions"><button id="bpSubmit" type="button">Post</button><span id="bpStatus" class="bp-status"></span></div>
+    </div>
+    <div id="bpList" class="bp-list"></div>
+  </aside>
 
   <footer class="credit">
     <div class="osnote">
@@ -1044,6 +1100,86 @@ function applyTheme(dark){
   applyChartTheme(dark);
 }
 
+/* ---------- community board ---------- */
+var BOARD={ loaded:false };
+function boardVotedSet(){ try{ return JSON.parse(localStorage.getItem("ps_voted")||"[]"); }catch(e){ return []; } }
+function timeAgo(ts){
+  var s=Math.floor(Date.now()/1000)-ts;
+  if(s<60) return "just now";
+  var m=Math.floor(s/60); if(m<60) return m+"m ago";
+  var h=Math.floor(m/60); if(h<24) return h+"h ago";
+  var d=Math.floor(h/24); if(d<30) return d+"d ago";
+  return new Date(ts*1000).toLocaleDateString();
+}
+function boardOpen(){
+  document.getElementById("boardPanel").classList.add("open");
+  document.getElementById("boardPanel").setAttribute("aria-hidden","false");
+  document.getElementById("boardBackdrop").classList.add("show");
+  if(!BOARD.loaded) boardLoad();
+}
+function boardCloseFn(){
+  document.getElementById("boardPanel").classList.remove("open");
+  document.getElementById("boardPanel").setAttribute("aria-hidden","true");
+  document.getElementById("boardBackdrop").classList.remove("show");
+}
+function boardRender(posts){
+  var voted=boardVotedSet(), list=document.getElementById("bpList");
+  if(!posts.length){ list.innerHTML='<div class="bp-empty">No posts yet. Be the first to share an idea.</div>'; return; }
+  var html="";
+  posts.forEach(function(p){
+    var did=voted.indexOf(p.id)>=0, fb=p.type==="feedback";
+    html+='<div class="bp-item"><div class="bp-itop">'+
+      '<span class="bp-chip'+(fb?" fb":"")+'">'+(fb?"Feedback":"Idea")+'</span>'+
+      '<span class="bp-who">'+esc(p.name||"Anonymous")+'</span>'+
+      '<span class="bp-time">'+timeAgo(p.created_at)+'</span></div>'+
+      '<div class="bp-msg">'+esc(p.message)+'</div>'+
+      '<button class="bp-vote'+(did?" voted":"")+'" data-id="'+p.id+'"'+(did?" disabled":"")+'>&#9650; <span>'+p.votes+'</span></button></div>';
+  });
+  list.innerHTML=html;
+  Array.prototype.forEach.call(list.querySelectorAll(".bp-vote:not(.voted)"),function(btn){
+    btn.addEventListener("click",function(){ boardVote(parseInt(btn.getAttribute("data-id"),10), btn); });
+  });
+}
+function boardLoad(){
+  var list=document.getElementById("bpList");
+  list.innerHTML='<div class="bp-empty">Loading\u2026</div>';
+  fetch("/api/board").then(function(r){return r.json();}).then(function(d){
+    if(d && d.posts){ BOARD.loaded=true; boardRender(d.posts); }
+    else { list.innerHTML='<div class="bp-empty">'+(d&&d.error?esc(d.error):"Couldn't load posts.")+'</div>'; }
+  }).catch(function(){ list.innerHTML='<div class="bp-empty">Couldn\'t load posts.</div>'; });
+}
+function boardVote(id, btn){
+  var voted=boardVotedSet(); if(voted.indexOf(id)>=0) return;
+  fetch("/api/board",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({vote:id})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d && d.ok){
+        voted.push(id); try{ localStorage.setItem("ps_voted",JSON.stringify(voted)); }catch(e){}
+        if(d.votes!=null){ var sp=btn.querySelector("span"); if(sp) sp.textContent=d.votes; }
+        btn.classList.add("voted"); btn.disabled=true;
+      }
+    }).catch(function(){});
+}
+function boardSubmit(){
+  var email=document.getElementById("bpEmail").value.trim();
+  var msg=document.getElementById("bpMsg").value.trim();
+  var name=document.getElementById("bpName").value.trim();
+  var type=document.getElementById("bpType").value;
+  var hp=document.getElementById("bpHp").value;
+  var st=document.getElementById("bpStatus");
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ st.textContent="Enter a valid email."; st.style.color="var(--down)"; return; }
+  if(msg.length<3){ st.textContent="Write a little more."; st.style.color="var(--down)"; return; }
+  st.textContent="Posting\u2026"; st.style.color="var(--sub)";
+  fetch("/api/board",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email,message:msg,name:name,type:type,hp:hp})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d && d.ok && d.post){
+        st.textContent="Posted. Thank you."; st.style.color="var(--teal-dark)";
+        document.getElementById("bpMsg").value="";
+        try{ localStorage.setItem("ps_board_email",email); localStorage.setItem("ps_board_name",name); }catch(e){}
+        boardLoad();
+      } else { st.textContent=(d&&d.error)?d.error:"Couldn't post."; st.style.color="var(--down)"; }
+    }).catch(function(){ st.textContent="Couldn't post."; st.style.color="var(--down)"; });
+}
+
 /* ---------- wire up ---------- */
 document.getElementById("symbol").addEventListener("change",function(e){ state.symbol=e.target.value; try{localStorage.setItem("ps_symbol",state.symbol);}catch(x){} load(); });
 document.getElementById("tf").addEventListener("change",function(e){
@@ -1067,6 +1203,10 @@ document.getElementById("fvgBtn").addEventListener("click",function(){
   positionFVG();
 });
 document.getElementById("readBtn").addEventListener("click",function(){ setReadMode(!state.readMode); });
+document.getElementById("boardTab").addEventListener("click",boardOpen);
+document.getElementById("boardClose").addEventListener("click",boardCloseFn);
+document.getElementById("boardBackdrop").addEventListener("click",boardCloseFn);
+document.getElementById("bpSubmit").addEventListener("click",boardSubmit);
 window.addEventListener("resize",function(){ positionNews(); positionFVG(); repositionBand(); });
 
 (function init(){
@@ -1098,6 +1238,10 @@ window.addEventListener("resize",function(){ positionNews(); positionFVG(); repo
   }
 
   renderRead();
+  try{
+    var be=localStorage.getItem("ps_board_email"); if(be) document.getElementById("bpEmail").value=be;
+    var bn=localStorage.getItem("ps_board_name"); if(bn) document.getElementById("bpName").value=bn;
+  }catch(e){}
   load();
   loadCalendar();
 })();

@@ -34,6 +34,8 @@ conditions; it never predicts direction or tells you to buy or sell.
 index.html                  the whole app (no build step)
 functions/api/candles.js    hidden-key proxy to Twelve Data (prices)
 functions/api/calendar.js   hidden-key proxy to the economic calendar
+functions/api/board.js       community board (ideas + feedback) backed by D1
+schema.sql                  one-time table setup for the board database
 README.md                   this file
 ```
 
@@ -65,6 +67,21 @@ Each load pulls the base chart (500 candles) plus the other timeframes for the
 trend strip and the Daily/4H confluence and gaps, about six calls. Higher
 timeframes change slowly, so it refreshes the base every minute and the rest
 every five. Normal personal use stays far under the free limits.
+
+## Community board (optional)
+
+The slide-out "Feedback" panel stores ideas and feedback in a Cloudflare D1
+database. To turn it on:
+
+1. In Cloudflare: Storage & Databases → D1 → create a database (any name).
+2. Open its Console and run the contents of `schema.sql` once (creates the
+   `posts` table).
+3. In the Pages project: Settings → Bindings → add a D1 binding named exactly
+   `DB` pointing at that database. Redeploy once.
+
+Email is required to post but is stored only — it's never returned to the
+public list. Until the database is bound, the panel shows a clear message and
+the rest of the site is unaffected.
 
 ## License
 

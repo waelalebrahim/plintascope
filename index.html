@@ -7,7 +7,7 @@
 <title>Plintascope: multi-timeframe market view</title>
 <meta name="author" content="Wael Alebrahim" />
 <meta name="description" content="It shows you the levels. It won't tell you the future. Auto support and resistance, multi-timeframe trend, momentum, and a live economic calendar, on one screen." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23157f66'/%3E%3Cg stroke='white' stroke-width='2.4' stroke-linecap='round'%3E%3Cline x1='8' y1='11' x2='24' y2='11'/%3E%3Cline x1='8' y1='16' x2='24' y2='16' opacity='0.6'/%3E%3Cline x1='8' y1='21' x2='24' y2='21'/%3E%3C/g%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23157f66'/%3E%3Cg stroke='white' stroke-width='2.2' stroke-linecap='round'%3E%3Cline x1='7' y1='11' x2='19' y2='11' opacity='0.55'/%3E%3Cline x1='7' y1='16' x2='25' y2='16'/%3E%3Cline x1='7' y1='21' x2='16' y2='21' opacity='0.55'/%3E%3C/g%3E%3Ccircle cx='25' cy='16' r='3.3' fill='%23157f66' stroke='white' stroke-width='2.2'/%3E%3C/svg%3E" />
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root{
@@ -34,7 +34,8 @@
   a{color:var(--teal-dark);}
 
   header.top{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;}
-  .brand{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;}
+  .brand{display:flex;align-items:center;gap:11px;flex-wrap:wrap;}
+  .logomark{flex:none;border-radius:8px;}
   .wordmark{font-size:25px;font-weight:700;letter-spacing:-0.03em;}
   .tag{font-size:13.5px;color:var(--sub);}
   .ctrls{display:flex;align-items:center;gap:8px;}
@@ -74,6 +75,9 @@
   .distline b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
   .pricehead .ohlc b{color:var(--ink);font-weight:600;}
   #chartDiv{width:100%;height:520px;}
+  .chartwrap{position:relative;}
+  #fvgLayer{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;overflow:hidden;z-index:2;}
+  .iconbtn.on{background:var(--teal);color:#fff;border-color:var(--teal);}
   #newsLane{position:relative;height:24px;margin-top:6px;border-top:1px dashed var(--border);}
   .newsdot{position:absolute;top:9px;width:9px;height:9px;border-radius:50%;transform:translateX(-50%);
     cursor:pointer;border:1.5px solid var(--card);display:none;}
@@ -85,7 +89,8 @@
   .expandbtn:hover{border-color:var(--teal);color:var(--teal-dark);}
   .chartcard.fs{position:fixed;inset:14px;z-index:60;max-width:none;margin:0;
     box-shadow:0 20px 60px rgba(20,40,36,0.25);display:flex;flex-direction:column;}
-  .chartcard.fs #chartDiv{flex:1;height:auto;}
+  .chartcard.fs .chartwrap{flex:1;}
+  .chartcard.fs #chartDiv{height:100%;}
 
   .rail{width:100%;display:flex;flex-direction:column;gap:12px;flex:1 1 240px;}
   @media(min-width:860px){.rail{flex:0 0 270px;}}
@@ -141,6 +146,15 @@
 
   <header class="top">
     <div class="brand">
+      <svg class="logomark" width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="#157f66"/>
+        <g stroke="#fff" stroke-width="2.2" stroke-linecap="round">
+          <line x1="7" y1="11" x2="19" y2="11" opacity="0.55"/>
+          <line x1="7" y1="16" x2="25" y2="16"/>
+          <line x1="7" y1="21" x2="16" y2="21" opacity="0.55"/>
+        </g>
+        <circle cx="25" cy="16" r="3.3" fill="#157f66" stroke="#fff" stroke-width="2.2"/>
+      </svg>
       <span class="wordmark">Plintascope</span>
       <span class="tag">It shows you the levels. It won't tell you the future.</span>
     </div>
@@ -195,6 +209,7 @@
         <option value="5min">5m</option>
         <option value="1min">1m</option>
       </select>
+      <button class="iconbtn" id="fvgBtn" title="Toggle Fair Value Gaps">FVG</button>
       <button class="iconbtn" id="theme" title="Toggle dark mode" aria-label="Toggle dark mode">&#9789;</button>
       <button class="refresh" id="refresh" title="Reload data">&#8635; Refresh</button>
     </div>
@@ -217,7 +232,7 @@
         <span class="ohlc mono" id="phOHLC"></span>
       </div>
       <div class="distline" id="distLine"></div>
-      <div id="chartDiv"></div>
+      <div class="chartwrap"><div id="chartDiv"></div><div id="fvgLayer"></div></div>
       <div id="newsLane"><span class="lanetip">News &#8594; scroll right for what's coming</span></div>
       <div id="popup"></div>
     </div>
@@ -298,6 +313,7 @@ var state = {
   rsi:50, levels:[], strip:[], verdict:"",
   events:[], selectedNews:null,
   htf:{ D:[], H4:[] },
+  fvg:[], fvgHTF:[], showFVG:true,
   dec:5, lastUpdated:null, dark:false
 };
 
@@ -394,6 +410,31 @@ function computeFinalLevels(){
   state.levels=picked;
 }
 
+// Fair Value Gap: a 3-candle imbalance. Bullish = candle3 low above candle1 high
+// (an untraded gap below); bearish = candle3 high below candle1 low. We only mark
+// the gaps; we never claim price will fill them.
+function detectFVG(candles){
+  var n=candles.length; if(n<5) return [];
+  var sumR=0; for(var q=0;q<n;q++) sumR+=(candles[q].h-candles[q].l);
+  var avg=sumR/n, minGap=avg*0.25, out=[];
+  for(var i=1;i<n-1;i++){
+    var a=candles[i-1], c=candles[i+1];
+    if(c.l > a.h && (c.l-a.h)>=minGap)      out.push({type:"bull", lo:a.h, hi:c.l, t:candles[i].time, idx:i});
+    else if(c.h < a.l && (a.l-c.h)>=minGap) out.push({type:"bear", lo:c.h, hi:a.l, t:candles[i].time, idx:i});
+  }
+  // keep only gaps price hasn't fully traded back through ("open" gaps)
+  var open=[];
+  out.forEach(function(f){
+    var filled=false;
+    for(var j=f.idx+2;j<n;j++){
+      if(f.type==="bull"){ if(candles[j].l<=f.lo){ filled=true; break; } }
+      else { if(candles[j].h>=f.hi){ filled=true; break; } }
+    }
+    if(!filled) open.push(f);
+  });
+  return open.slice(-12);
+}
+
 function trendDir(series, look, thresh){
   look = look||8; thresh = thresh||0.0006;
   if(series.length<=look) return "flat";
@@ -478,7 +519,7 @@ function ensureChart(){
     if(!param || !param.time || !param.seriesData){ updateOHLC(null); return; }
     updateOHLC(param.seriesData.get(series) || null);
   });
-  chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ positionNews(); });
+  chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ positionNews(); positionFVG(); });
   applyChartTheme(state.dark);
   return true;
 }
@@ -508,6 +549,7 @@ function drawChart(fit){
   updatePriceHeader();
   updateOHLC(null);
   positionNews();
+  positionFVG();
 }
 
 function drawLevels(){
@@ -554,6 +596,42 @@ function positionNews(){
     if(x==null || x<2 || x>w-2){ dot.style.display="none"; }
     else { dot.style.display="block"; dot.style.left=x+"px"; }
   }
+}
+
+function positionFVG(){
+  var layer=document.getElementById("fvgLayer"); if(!layer) return;
+  var hasAny = (state.fvg && state.fvg.length) || (state.fvgHTF && state.fvgHTF.length);
+  if(!state.showFVG || !chart || !series || !hasAny || !state.candles.length){ layer.innerHTML=""; return; }
+  var ts=chart.timeScale();
+  var w=layer.clientWidth, h=layer.clientHeight;
+  var rightX=ts.timeToCoordinate(state.candles[state.candles.length-1].time);
+  if(rightX==null) rightX=w;
+  var html="";
+  function box(f, htf){
+    var x=ts.timeToCoordinate(f.t);
+    var yHi=series.priceToCoordinate(f.hi), yLo=series.priceToCoordinate(f.lo);
+    if(x==null || yHi==null || yLo==null) return;
+    var left=Math.max(0,x), width=Math.max(2,rightX-left);
+    var top=Math.min(yHi,yLo), height=Math.max(1,Math.abs(yLo-yHi));
+    if(top>h || top+height<0 || left>w) return;
+    var fill, edge, bw;
+    if(htf){
+      fill = f.type==="bull" ? "rgba(47,143,111,0.07)" : "rgba(176,71,58,0.07)";
+      edge = f.type==="bull" ? "rgba(47,143,111,0.45)" : "rgba(176,71,58,0.45)";
+      bw="1px dashed "+edge;
+    } else {
+      fill = f.type==="bull" ? "rgba(47,143,111,0.15)" : "rgba(176,71,58,0.14)";
+      edge = f.type==="bull" ? "rgba(47,143,111,0.55)" : "rgba(176,71,58,0.55)";
+      bw="1px solid "+edge;
+    }
+    html+='<div style="position:absolute;left:'+left+'px;top:'+top+'px;width:'+width+'px;height:'+height+'px;'+
+          'background:'+fill+';border-top:'+bw+';border-bottom:'+bw+';">'+
+          (htf?'<span style="position:absolute;left:3px;top:0;font-size:9px;line-height:1.3;color:'+edge+'">'+f.tf+'</span>':'')+
+          '</div>';
+  }
+  state.fvgHTF.forEach(function(f){ box(f,true); });
+  state.fvg.forEach(function(f){ box(f,false); });
+  layer.innerHTML=html;
 }
 
 function loadCalendar(){
@@ -626,18 +704,21 @@ function loadStrip(sym){
     });
   })).then(function(results){
     state.strip = results.map(function(r){ return { tf:r.tf, dir:r.dir }; });
+    var htfg=[];
     results.forEach(function(r){
-      if(r.tf==="D"  && r.candles) state.htf.D  = srCandidates(r.candles).levels;
-      if(r.tf==="4H" && r.candles) state.htf.H4 = srCandidates(r.candles).levels;
+      if(r.tf==="D"  && r.candles){ state.htf.D  = srCandidates(r.candles).levels; detectFVG(r.candles).forEach(function(f){ f.tf="D";  htfg.push(f); }); }
+      if(r.tf==="4H" && r.candles){ state.htf.H4 = srCandidates(r.candles).levels; detectFVG(r.candles).forEach(function(f){ f.tf="4H"; htfg.push(f); }); }
     });
+    state.fvgHTF=htfg;
     buildVerdict(); renderStrip();
-    computeFinalLevels(); drawLevels(); renderLevels();
+    computeFinalLevels(); drawLevels(); renderLevels(); positionFVG();
   });
 }
 
 function computeIndicators(){
   state.rsi=computeRSI(state.closes);
   computeFinalLevels();
+  state.fvg=detectFVG(state.candles);
 }
 
 function load(){
@@ -664,6 +745,7 @@ function load(){
 function useSample(code){
   stopAuto();
   state.live=false;
+  state.htf={ D:[], H4:[] }; state.fvgHTF=[];
   state.candles=generateCandles();
   state.closes=state.candles.map(function(c){return c.c;});
   state.dec=5;
@@ -831,9 +913,15 @@ document.getElementById("expandBtn").addEventListener("click",function(){
   var on=document.getElementById("chart").classList.toggle("fs");
   this.innerHTML = on ? "\u00d7" : "\u26f6";
   this.title = on ? "Close" : "Expand chart";
-  setTimeout(positionNews,80);
+  setTimeout(function(){ positionNews(); positionFVG(); },80);
 });
-window.addEventListener("resize",function(){ positionNews(); });
+document.getElementById("fvgBtn").addEventListener("click",function(){
+  state.showFVG=!state.showFVG;
+  this.classList.toggle("on", state.showFVG);
+  try{ localStorage.setItem("ps_fvg", state.showFVG?"on":"off"); }catch(x){}
+  positionFVG();
+});
+window.addEventListener("resize",function(){ positionNews(); positionFVG(); });
 
 (function init(){
   var savedTheme="light", savedSym=null, savedTf=null;
@@ -845,6 +933,11 @@ window.addEventListener("resize",function(){ positionNews(); });
   state.dark=(savedTheme==="dark");
   document.body.classList.toggle("dark", state.dark);
   document.getElementById("theme").innerHTML = state.dark ? "\u2600" : "\u263d";
+
+  var savedFvg="on";
+  try{ savedFvg=localStorage.getItem("ps_fvg")||"on"; }catch(e){}
+  state.showFVG=(savedFvg!=="off");
+  document.getElementById("fvgBtn").classList.toggle("on", state.showFVG);
 
   var symSel=document.getElementById("symbol");
   if(savedSym){

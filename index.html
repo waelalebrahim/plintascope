@@ -70,6 +70,8 @@
   .pricehead .px{font-size:25px;font-weight:700;letter-spacing:-0.02em;}
   .pricehead .chg{font-size:14px;font-weight:600;}
   .pricehead .ohlc{font-size:12px;color:var(--sub);margin-left:auto;display:flex;gap:11px;align-self:center;}
+  .distline{font-size:12.5px;color:var(--sub);padding:0 4px 8px 44px;display:flex;gap:12px;flex-wrap:wrap;}
+  .distline b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
   .pricehead .ohlc b{color:var(--ink);font-weight:600;}
   #chartDiv{width:100%;height:520px;}
   #newsLane{position:relative;height:24px;margin-top:6px;border-top:1px dashed var(--border);}
@@ -214,6 +216,7 @@
         <span class="chg mono" id="phChg"></span>
         <span class="ohlc mono" id="phOHLC"></span>
       </div>
+      <div class="distline" id="distLine"></div>
       <div id="chartDiv"></div>
       <div id="newsLane"><span class="lanetip">News &#8594; scroll right for what's coming</span></div>
       <div id="popup"></div>
@@ -224,7 +227,7 @@
       <div class="card panel">
         <div class="h">Major levels, strongest first</div>
         <div class="lvls" id="lvls"></div>
-        <div class="note">Solid line = strong (held more often, on higher timeframes). Dashed = lighter.</div>
+        <div class="note">Solid = strong (confirmed on Daily/4H). Dashed = medium. Dotted = this timeframe only. Tags show which timeframes each level sits on.</div>
       </div>
       <div class="infonote">
         <span>&#9432;</span>
@@ -294,6 +297,7 @@ var state = {
   live:false, candles:[], closes:[],
   rsi:50, levels:[], strip:[], verdict:"",
   events:[], selectedNews:null,
+  htf:{ D:[], H4:[] },
   dec:5, lastUpdated:null, dark:false
 };
 
@@ -314,7 +318,8 @@ function computeRSI(closes, period){
   return 100 - 100/(1+(avgG/avgL));
 }
 
-function detectSR(candles, currentPrice){
+function srCandidates(candles){
+  if(!candles || candles.length<10) return {levels:[], range:1};
   var k=3, pivots=[], i, j;
   for(i=k;i<candles.length-k;i++){
     var isHigh=true, isLow=true;
@@ -322,44 +327,71 @@ function detectSR(candles, currentPrice){
       if(candles[j].h>candles[i].h) isHigh=false;
       if(candles[j].l<candles[i].l) isLow=false;
     }
-    if(isHigh) pivots.push({price:candles[i].h, idx:i});
-    if(isLow)  pivots.push({price:candles[i].l, idx:i});
+    if(isHigh) pivots.push(candles[i].h);
+    if(isLow)  pivots.push(candles[i].l);
   }
-  pivots.sort(function(a,b){return a.price-b.price;});
+  pivots.sort(function(a,b){return a-b;});
   var minL=Math.min.apply(null,candles.map(function(x){return x.l;}));
   var maxH=Math.max.apply(null,candles.map(function(x){return x.h;}));
-  var range=(maxH-minL)||1;
-  var tol=range*0.05;
-  var clusters=[];
+  var range=(maxH-minL)||1, tol=range*0.05, clusters=[];
   for(i=0;i<pivots.length;i++){
-    var p=pivots[i];
+    var p=pivots[i], last=clusters[clusters.length-1];
+    if(last && (p - last.sum/last.touches) <= tol){ last.sum+=p; last.touches++; }
+    else clusters.push({sum:p, touches:1});
+  }
+  return { levels: clusters.map(function(c){ return {price:c.sum/c.touches, touches:c.touches}; }), range:range };
+}
+
+function tfWeight(tf){ return ({D:3,"4H":2,"1H":1.4,"30m":1,"15m":0.8,"5m":0.6,"1m":0.5})[tf] || 1; }
+
+// Merge S&R from the base timeframe with the Daily and 4H levels.
+// A zone confirmed across timeframes scores higher = a genuinely strong level.
+function computeFinalLevels(){
+  if(!state.closes.length){ state.levels=[]; return; }
+  var cur=state.closes[state.closes.length-1];
+  var base=srCandidates(state.candles), range=base.range;
+  var groups=[{tf:state.baseTf, levels:base.levels}];
+  if(state.baseTf!=="D"  && state.htf.D.length)  groups.push({tf:"D",  levels:state.htf.D});
+  if(state.baseTf!=="4H" && state.htf.H4.length) groups.push({tf:"4H", levels:state.htf.H4});
+  var htfPresent = groups.length>1;
+
+  var pts=[];
+  groups.forEach(function(g){ g.levels.forEach(function(l){ pts.push({price:l.price, tf:g.tf, touches:l.touches}); }); });
+  pts.sort(function(a,b){return a.price-b.price;});
+
+  var tol=range*0.05, clusters=[];
+  pts.forEach(function(p){
     var last=clusters[clusters.length-1];
-    if(last && (p.price - last.sum/last.touches) <= tol){
-      last.sum+=p.price; last.touches++; last.lastIdx=Math.max(last.lastIdx,p.idx);
+    if(last && (p.price - last.psum/last.n) <= tol){
+      last.psum+=p.price; last.n++; last.touches+=p.touches;
+      last.tfs[p.tf]=(last.tfs[p.tf]||0)+p.touches;
     } else {
-      clusters.push({sum:p.price, touches:1, lastIdx:p.idx});
+      var o={psum:p.price, n:1, touches:p.touches, tfs:{}}; o.tfs[p.tf]=p.touches; clusters.push(o);
     }
-  }
-  var n=candles.length;
-  var scored=clusters.map(function(cl){
-    return { price:cl.sum/cl.touches, touches:cl.touches, lastIdx:cl.lastIdx,
-             score: cl.touches*1.4 + (cl.lastIdx/n)*1.2 };
   });
-  scored.sort(function(a,b){return b.score-a.score;});
-  var picked=[], minSep=range*0.045;
-  for(i=0;i<scored.length;i++){
-    var s=scored[i], ok=true;
-    for(j=0;j<picked.length;j++){ if(Math.abs(s.price-picked[j].price)<minSep){ ok=false; break; } }
-    if(ok) picked.push(s);
-    if(picked.length>=5) break;
-  }
-  picked.forEach(function(p){
-    p.type = p.price<currentPrice ? "support":"resistance";
-    p.tier = (p.touches>=3||p.score>=4.5) ? "strong":"medium";
-    p.tfs  = p.touches>=4 ? ["D","4H","30m"] : (p.touches>=2 ? ["4H","30m"] : ["30m"]);
+
+  var order={D:0,"4H":1,"1H":2,"30m":3,"15m":4,"5m":5,"1m":6};
+  var levels=clusters.map(function(c){
+    var price=c.psum/c.n, tfList=Object.keys(c.tfs);
+    tfList.sort(function(a,b){return (order[a]==null?9:order[a])-(order[b]==null?9:order[b]);});
+    var score=0; tfList.forEach(function(tf){ score+=tfWeight(tf); });
+    score += Math.min(c.touches,6)*0.15;
+    var tier;
+    if(htfPresent) tier = score>=3 ? "strong" : (score>=1.8 ? "medium" : "light");
+    else tier = c.touches>=3 ? "strong" : (c.touches>=2 ? "medium" : "light");
+    return { price:price, touches:c.touches, tfs:tfList, score:score, tier:tier,
+             type: price<cur ? "support":"resistance" };
   });
+  levels.sort(function(a,b){return b.score-a.score;});
+  var picked=[], minSep=range*0.04;
+  for(var i=0;i<levels.length;i++){
+    var ok=true;
+    for(var j=0;j<picked.length;j++){ if(Math.abs(levels[i].price-picked[j].price)<minSep){ ok=false; break; } }
+    if(ok) picked.push(levels[i]);
+    if(picked.length>=7) break;
+  }
   picked.sort(function(a,b){return b.price-a.price;});
-  return picked;
+  state.levels=picked;
 }
 
 function trendDir(series, look, thresh){
@@ -483,10 +515,12 @@ function drawLevels(){
   priceLines=[];
   state.levels.forEach(function(lv){
     var col = lv.type==="support" ? getCss("--teal") : getCss("--plum");
+    var ls = lv.tier==="strong" ? LightweightCharts.LineStyle.Solid
+           : (lv.tier==="medium" ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Dotted);
     priceLines.push(series.createPriceLine({
       price:lv.price, color:col,
       lineWidth: lv.tier==="strong" ? 2 : 1,
-      lineStyle: lv.tier==="strong" ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+      lineStyle: ls,
       axisLabelVisible:true, title:(lv.type==="support"?"S":"R")
     }));
   });
@@ -552,6 +586,24 @@ function updatePriceHeader(){
   var el=document.getElementById("phChg");
   el.style.color=col;
   el.textContent=arrow+" "+(up?"+":"")+chg.toFixed(state.dec)+"  ("+(up?"+":"")+pct.toFixed(2)+"%)  "+(up?"+":"")+pips.toFixed(0)+" pips";
+  updateDistance();
+}
+
+function updateDistance(){
+  var el=document.getElementById("distLine"); if(!el) return;
+  var c=state.candles;
+  if(!c.length || !state.levels.length){ el.innerHTML=""; return; }
+  var cur=c[c.length-1].c;
+  var pip = state.dec>=4 ? 0.0001 : (state.dec===2?0.01:Math.pow(10,-(state.dec-2)));
+  var res=null, sup=null;
+  state.levels.forEach(function(lv){
+    if(lv.price>cur){ if(res==null || lv.price<res.price) res=lv; }
+    else { if(sup==null || lv.price>sup.price) sup=lv; }
+  });
+  var parts=[];
+  if(res) parts.push('<span style="color:var(--plum)">&#9650; R <b>'+fmtPrice(res.price)+'</b> (+'+Math.round((res.price-cur)/pip)+'p)</span>');
+  if(sup) parts.push('<span style="color:var(--teal)">&#9660; S <b>'+fmtPrice(sup.price)+'</b> ('+Math.round((sup.price-cur)/pip)+'p)</span>');
+  el.innerHTML = parts.length ? ("<span style='color:var(--sub)'>Nearest:</span> "+parts.join(" ")) : "";
 }
 
 function updateOHLC(d){
@@ -567,17 +619,25 @@ function updateOHLC(d){
 /* ---------- load ---------- */
 function loadStrip(sym){
   return Promise.all(TF.map(function(t){
-    if(t.interval===state.baseInterval){ return Promise.resolve({ tf:t.key, dir:trendDir(state.closes) }); }
-    return getTF(sym, t.interval, 30).then(function(r){
-      return { tf:t.key, dir: r.candles ? trendDir(r.candles.map(function(c){return c.c;})) : null };
+    if(t.interval===state.baseInterval){ return Promise.resolve({ tf:t.key, dir:trendDir(state.closes), candles:null }); }
+    var size = (t.key==="D"||t.key==="4H") ? 200 : 30;
+    return getTF(sym, t.interval, size).then(function(r){
+      return { tf:t.key, dir: r.candles ? trendDir(r.candles.map(function(c){return c.c;})) : null, candles:r.candles };
     });
-  })).then(function(results){ state.strip = results; buildVerdict(); renderStrip(); });
+  })).then(function(results){
+    state.strip = results.map(function(r){ return { tf:r.tf, dir:r.dir }; });
+    results.forEach(function(r){
+      if(r.tf==="D"  && r.candles) state.htf.D  = srCandidates(r.candles).levels;
+      if(r.tf==="4H" && r.candles) state.htf.H4 = srCandidates(r.candles).levels;
+    });
+    buildVerdict(); renderStrip();
+    computeFinalLevels(); drawLevels(); renderLevels();
+  });
 }
 
 function computeIndicators(){
-  var cur=state.closes[state.closes.length-1];
   state.rsi=computeRSI(state.closes);
-  state.levels=detectSR(state.candles, cur);
+  computeFinalLevels();
 }
 
 function load(){
@@ -758,10 +818,11 @@ function applyTheme(dark){
 }
 
 /* ---------- wire up ---------- */
-document.getElementById("symbol").addEventListener("change",function(e){ state.symbol=e.target.value; load(); });
+document.getElementById("symbol").addEventListener("change",function(e){ state.symbol=e.target.value; try{localStorage.setItem("ps_symbol",state.symbol);}catch(x){} load(); });
 document.getElementById("tf").addEventListener("change",function(e){
   var o=BASE_OPTS.find(function(x){return x.interval===e.target.value;});
   if(o){ state.baseInterval=o.interval; state.baseTf=o.tf; }
+  try{localStorage.setItem("ps_tf",state.baseInterval);}catch(x){}
   load();
 });
 document.getElementById("refresh").addEventListener("click",function(){ load(); });
@@ -775,11 +836,26 @@ document.getElementById("expandBtn").addEventListener("click",function(){
 window.addEventListener("resize",function(){ positionNews(); });
 
 (function init(){
-  var saved="light";
-  try{ saved=localStorage.getItem("ps_theme")||"light"; }catch(e){}
-  state.dark=(saved==="dark");
+  var savedTheme="light", savedSym=null, savedTf=null;
+  try{
+    savedTheme=localStorage.getItem("ps_theme")||"light";
+    savedSym=localStorage.getItem("ps_symbol");
+    savedTf=localStorage.getItem("ps_tf");
+  }catch(e){}
+  state.dark=(savedTheme==="dark");
   document.body.classList.toggle("dark", state.dark);
   document.getElementById("theme").innerHTML = state.dark ? "\u2600" : "\u263d";
+
+  var symSel=document.getElementById("symbol");
+  if(savedSym){
+    var has=Array.prototype.some.call(symSel.options,function(o){return o.value===savedSym;});
+    if(has){ state.symbol=savedSym; symSel.value=savedSym; }
+  }
+  if(savedTf){
+    var o=BASE_OPTS.find(function(x){return x.interval===savedTf;});
+    if(o){ state.baseInterval=o.interval; state.baseTf=o.tf; document.getElementById("tf").value=o.interval; }
+  }
+
   load();
   loadCalendar();
 })();

@@ -16,7 +16,7 @@ export async function onRequest(context) {
 
   // No key yet -> tell the frontend so it can show sample data instead of breaking.
   if (!key) {
-    return json({ status: "error", code: "no_key", message: "Tddd47939f5f34fd48ce24f7b01b4cad5" });
+    return json({ status: "error", code: "no_key", message: "TWELVE_DATA_KEY is not set." });
   }
 
   const api =

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<!-- Brand: Plintascope -->
-<title>Plintascope: multi-timeframe market view</title>
+<!-- Brand: PlintaScope -->
+<title>PlintaScope: multi-timeframe market view</title>
 <meta name="author" content="Wael Alebrahim" />
 <meta name="description" content="It shows you the levels. It won't tell you the future. Auto support and resistance, multi-timeframe trend, momentum, and a live economic calendar, on one screen." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23157f66'/%3E%3Cg stroke='white' stroke-width='2.2' stroke-linecap='round'%3E%3Cline x1='7' y1='11' x2='19' y2='11' opacity='0.55'/%3E%3Cline x1='7' y1='16' x2='25' y2='16'/%3E%3Cline x1='7' y1='21' x2='16' y2='21' opacity='0.55'/%3E%3C/g%3E%3Ccircle cx='25' cy='16' r='3.3' fill='%23157f66' stroke='white' stroke-width='2.2'/%3E%3C/svg%3E" />
@@ -77,6 +77,18 @@
   #chartDiv{width:100%;height:520px;}
   .chartwrap{position:relative;}
   #fvgLayer{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;overflow:hidden;z-index:2;}
+  #readLayer{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;overflow:hidden;z-index:3;}
+  #readLayer.active{pointer-events:auto;cursor:crosshair;}
+  #readBand{position:absolute;top:0;bottom:0;display:none;background:rgba(21,127,102,0.12);
+    border-left:1px dashed var(--teal);border-right:1px dashed var(--teal);}
+  body.dark #readBand{background:rgba(43,179,140,0.16);}
+  .readhint{font-size:12px;color:var(--sub);line-height:1.5;}
+  .readbody{font-size:13.5px;line-height:1.6;color:var(--ink);}
+  .readbody .caveat{color:var(--sub);}
+  .readlabel{font-size:11.5px;color:var(--sub);margin-bottom:5px;}
+  .readseg{display:flex;gap:6px;margin-bottom:9px;}
+  .readseg button{font:inherit;font-size:12px;padding:3px 11px;border:1px solid var(--border);background:var(--card);color:var(--sub);border-radius:7px;cursor:pointer;}
+  .readseg button.on{background:var(--teal-soft);border-color:var(--teal);color:var(--teal-dark);}
   .iconbtn.on{background:var(--teal);color:#fff;border-color:var(--teal);}
   #newsLane{position:relative;height:24px;margin-top:6px;border-top:1px dashed var(--border);}
   .newsdot{position:absolute;top:9px;width:9px;height:9px;border-radius:50%;transform:translateX(-50%);
@@ -155,7 +167,7 @@
         </g>
         <circle cx="25" cy="16" r="3.3" fill="#157f66" stroke="#fff" stroke-width="2.2"/>
       </svg>
-      <span class="wordmark">Plintascope</span>
+      <span class="wordmark">PlintaScope</span>
       <span class="tag">It shows you the levels. It won't tell you the future.</span>
     </div>
     <div class="ctrls">
@@ -210,6 +222,7 @@
         <option value="1min">1m</option>
       </select>
       <button class="iconbtn" id="fvgBtn" title="Toggle Fair Value Gaps">FVG</button>
+      <button class="iconbtn" id="readBtn" title="Read candles: drag to select a group">Read</button>
       <button class="iconbtn" id="theme" title="Toggle dark mode" aria-label="Toggle dark mode">&#9789;</button>
       <button class="refresh" id="refresh" title="Reload data">&#8635; Refresh</button>
     </div>
@@ -232,12 +245,13 @@
         <span class="ohlc mono" id="phOHLC"></span>
       </div>
       <div class="distline" id="distLine"></div>
-      <div class="chartwrap"><div id="chartDiv"></div><div id="fvgLayer"></div></div>
+      <div class="chartwrap"><div id="chartDiv"></div><div id="fvgLayer"></div><div id="readLayer"><div id="readBand"></div></div></div>
       <div id="newsLane"><span class="lanetip">News &#8594; scroll right for what's coming</span></div>
       <div id="popup"></div>
     </div>
 
     <div class="rail">
+      <div class="card panel" id="readPanel"></div>
       <div class="card panel" id="rsiPanel"></div>
       <div class="card panel">
         <div class="h">Major levels, strongest first</div>
@@ -314,6 +328,7 @@ var state = {
   events:[], selectedNews:null,
   htf:{ D:[], H4:[] },
   fvg:[], fvgHTF:[], showFVG:true,
+  readMode:false, readSel:null, readStyle:"drag",
   dec:5, lastUpdated:null, dark:false
 };
 
@@ -519,8 +534,9 @@ function ensureChart(){
     if(!param || !param.time || !param.seriesData){ updateOHLC(null); return; }
     updateOHLC(param.seriesData.get(series) || null);
   });
-  chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ positionNews(); positionFVG(); });
+  chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ positionNews(); positionFVG(); repositionBand(); });
   applyChartTheme(state.dark);
+  initReadLayer();
   return true;
 }
 
@@ -550,6 +566,7 @@ function drawChart(fit){
   updateOHLC(null);
   positionNews();
   positionFVG();
+  repositionBand();
 }
 
 function drawLevels(){
@@ -632,6 +649,133 @@ function positionFVG(){
   state.fvgHTF.forEach(function(f){ box(f,true); });
   state.fvg.forEach(function(f){ box(f,false); });
   layer.innerHTML=html;
+}
+
+/* ---------- candle reader (drag to select a group) ---------- */
+function pipSize(){ return state.dec>=4 ? 0.0001 : (state.dec===2 ? 0.01 : Math.pow(10,-(state.dec-2))); }
+
+function describeCandles(a,b){
+  var cs=state.candles.slice(a,b+1), m=cs.length;
+  if(m<2) return null;
+  var first=cs[0], last=cs[m-1], net=last.c-first.o;
+  var pips=Math.round(net/pipSize());
+  var hi=-Infinity, lo=Infinity, ub=0, lb=0, bd=0;
+  cs.forEach(function(c){
+    hi=Math.max(hi,c.h); lo=Math.min(lo,c.l);
+    ub+=c.h-Math.max(c.o,c.c); lb+=Math.min(c.o,c.c)-c.l; bd+=Math.abs(c.c-c.o);
+  });
+  var span=(hi-lo)||pipSize(); ub/=m; lb/=m; bd/=m;
+  var ratio=Math.abs(net)/span;
+  var dir = net>span*0.08 ? "up" : (net<-span*0.08 ? "down":"flat");
+  var s1;
+  if(dir==="flat"){
+    s1="Price went mostly sideways across these "+m+" candles, about "+Math.abs(pips)+" pips net \u2014 choppy and indecisive, lots of overlap and no real progress.";
+  } else {
+    var dword=dir==="up"?"rose":"fell";
+    var shape=ratio>0.55 ? "a steady, one-directional push" : "a move with plenty of back-and-forth";
+    s1="Price "+dword+" about "+Math.abs(pips)+" pips across these "+m+" candles \u2014 "+shape+".";
+  }
+  var s2;
+  if(ub>bd*0.9 && ub>lb*1.4) s2="Long upper wicks show sellers kept rejecting higher prices.";
+  else if(lb>bd*0.9 && lb>ub*1.4) s2="Long lower wicks show buyers kept stepping in underneath.";
+  else {
+    var cp=(last.c-lo)/span;
+    if(cp>0.66) s2="It's closing near the top of the range \u2014 buyers had the upper hand in this stretch.";
+    else if(cp<0.34) s2="It's closing near the bottom of the range \u2014 sellers had the upper hand in this stretch.";
+    else s2="Bodies and wicks are fairly balanced \u2014 no side clearly winning.";
+  }
+  return { m:m, html:s1+" "+s2+' <span class="caveat">This describes what happened, not what comes next.</span>' };
+}
+
+function renderRead(){
+  var p=document.getElementById("readPanel"); if(!p) return;
+  if(!state.readMode){
+    p.innerHTML='<div class="readlabel">Candle read</div><div class="readhint">Click <b>Read</b> above, then move over or drag across candles to see what they\'re doing.</div>';
+    return;
+  }
+  var seg='<div class="readseg">'+
+    '<button type="button" data-style="hover" class="'+(state.readStyle==="hover"?"on":"")+'">Hover</button>'+
+    '<button type="button" data-style="drag" class="'+(state.readStyle==="drag"?"on":"")+'">Drag</button></div>';
+  p.innerHTML='<div class="readlabel">Candle read</div>'+seg+'<div id="readBody"></div>';
+  Array.prototype.forEach.call(p.querySelectorAll(".readseg button"),function(b){
+    b.addEventListener("click",function(){ setReadStyle(b.getAttribute("data-style")); });
+  });
+  updateReadBody();
+}
+
+function updateReadBody(){
+  var el=document.getElementById("readBody"); if(!el) return;
+  if(!state.readSel){
+    el.innerHTML='<div class="readhint">'+(state.readStyle==="hover"
+      ? "Move your mouse across the candles. Panning is paused while Read is on."
+      : "Drag across a group of candles. Panning is paused while Read is on.")+'</div>';
+    return;
+  }
+  var d=describeCandles(state.readSel.a, state.readSel.b);
+  if(!d){ el.innerHTML='<div class="readhint">That\'s too narrow \u2014 cover a few more candles.</div>'; return; }
+  el.innerHTML='<div class="readlabel">Reading '+d.m+' candles</div><div class="readbody">'+d.html+'</div>';
+}
+
+function setReadStyle(s){
+  state.readStyle=s;
+  try{ localStorage.setItem("ps_readstyle", s); }catch(e){}
+  state.readSel=null; var band=document.getElementById("readBand"); if(band) band.style.display="none";
+  renderRead();
+}
+
+function repositionBand(){
+  var band=document.getElementById("readBand");
+  if(!band || !chart || !state.readSel){ if(band) band.style.display="none"; return; }
+  var ts=chart.timeScale();
+  var x1=ts.logicalToCoordinate(state.readSel.a), x2=ts.logicalToCoordinate(state.readSel.b);
+  if(x1==null || x2==null){ band.style.display="none"; return; }
+  var left=Math.min(x1,x2), right=Math.max(x1,x2);
+  band.style.display="block"; band.style.left=left+"px"; band.style.width=Math.max(2,right-left)+"px";
+}
+
+function setReadMode(on){
+  state.readMode=on;
+  var layer=document.getElementById("readLayer"), btn=document.getElementById("readBtn");
+  layer.classList.toggle("active", on);
+  btn.classList.toggle("on", on);
+  if(chart) chart.applyOptions({ handleScroll:on?false:true, handleScale:on?false:true });
+  if(!on){ state.readSel=null; document.getElementById("readBand").style.display="none"; }
+  renderRead();
+}
+
+function initReadLayer(){
+  var layer=document.getElementById("readLayer");
+  if(!layer || layer._wired) return; layer._wired=true;
+  var dragging=false, startLogical=0;
+  function logicalAt(ev){
+    if(!chart) return null;
+    var rect=layer.getBoundingClientRect();
+    var lg=chart.timeScale().coordinateToLogical(ev.clientX-rect.left);
+    if(lg==null) return null;
+    return Math.max(0, Math.min(state.candles.length-1, Math.round(lg)));
+  }
+  layer.addEventListener("pointerdown",function(ev){
+    if(!state.readMode || state.readStyle!=="drag") return;
+    var lg=logicalAt(ev); if(lg==null) return;
+    dragging=true; startLogical=lg; state.readSel={a:lg,b:lg};
+    layer.setPointerCapture(ev.pointerId);
+    repositionBand(); updateReadBody();
+  });
+  layer.addEventListener("pointermove",function(ev){
+    if(!state.readMode) return;
+    if(state.readStyle==="hover"){
+      var lg=logicalAt(ev); if(lg==null) return;
+      state.readSel={a:Math.max(0,lg-5), b:Math.min(state.candles.length-1,lg+5)};
+      repositionBand(); updateReadBody();
+    } else if(dragging){
+      var lg2=logicalAt(ev); if(lg2==null) return;
+      state.readSel={a:Math.min(startLogical,lg2), b:Math.max(startLogical,lg2)};
+      repositionBand(); updateReadBody();
+    }
+  });
+  function end(){ dragging=false; }
+  layer.addEventListener("pointerup",end);
+  layer.addEventListener("pointercancel",end);
 }
 
 function loadCalendar(){
@@ -723,6 +867,7 @@ function computeIndicators(){
 
 function load(){
   var sym = state.symbol;
+  state.readSel=null;
   setBanner("loading");
   getTF(sym, state.baseInterval, 500).then(function(base){
     if(base.candles && base.candles.length>20){
@@ -864,7 +1009,7 @@ function renderPopup(){
   if(state.selectedNews==null || !state.events[state.selectedNews]){ p.innerHTML=""; p.style.display="none"; return; }
   var ev=state.events[state.selectedNews], col=impactColor(ev.impact);
   var im=(ev.impact||"").toLowerCase();
-  var note = im==="high" ? "High impact: expect volatility around this time. Plintascope flags it, it does not predict direction."
+  var note = im==="high" ? "High impact: expect volatility around this time. PlintaScope flags it, it does not predict direction."
            : im==="medium" ? "Medium impact: can stir some movement."
            : im==="low" ? "Low impact: usually a minor mover on its own."
            : "Scheduled event.";
@@ -913,7 +1058,7 @@ document.getElementById("expandBtn").addEventListener("click",function(){
   var on=document.getElementById("chart").classList.toggle("fs");
   this.innerHTML = on ? "\u00d7" : "\u26f6";
   this.title = on ? "Close" : "Expand chart";
-  setTimeout(function(){ positionNews(); positionFVG(); },80);
+  setTimeout(function(){ positionNews(); positionFVG(); repositionBand(); },80);
 });
 document.getElementById("fvgBtn").addEventListener("click",function(){
   state.showFVG=!state.showFVG;
@@ -921,7 +1066,8 @@ document.getElementById("fvgBtn").addEventListener("click",function(){
   try{ localStorage.setItem("ps_fvg", state.showFVG?"on":"off"); }catch(x){}
   positionFVG();
 });
-window.addEventListener("resize",function(){ positionNews(); positionFVG(); });
+document.getElementById("readBtn").addEventListener("click",function(){ setReadMode(!state.readMode); });
+window.addEventListener("resize",function(){ positionNews(); positionFVG(); repositionBand(); });
 
 (function init(){
   var savedTheme="light", savedSym=null, savedTf=null;
@@ -939,6 +1085,8 @@ window.addEventListener("resize",function(){ positionNews(); positionFVG(); });
   state.showFVG=(savedFvg!=="off");
   document.getElementById("fvgBtn").classList.toggle("on", state.showFVG);
 
+  try{ var rs=localStorage.getItem("ps_readstyle"); if(rs==="hover"||rs==="drag") state.readStyle=rs; }catch(e){}
+
   var symSel=document.getElementById("symbol");
   if(savedSym){
     var has=Array.prototype.some.call(symSel.options,function(o){return o.value===savedSym;});
@@ -949,6 +1097,7 @@ window.addEventListener("resize",function(){ positionNews(); positionFVG(); });
     if(o){ state.baseInterval=o.interval; state.baseTf=o.tf; document.getElementById("tf").value=o.interval; }
   }
 
+  renderRead();
   load();
   loadCalendar();
 })();

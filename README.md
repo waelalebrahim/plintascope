@@ -1,4 +1,4 @@
-# Plintascope: multi-timeframe market view
+# PlintaScope: multi-timeframe market view
 
 *It shows you the levels. It won't tell you the future.*
 

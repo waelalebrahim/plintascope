@@ -12,3 +12,15 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts (created_at);
+
+-- Replies to posts (one level deep). Added later; run these to enable replies.
+CREATE TABLE IF NOT EXISTS replies (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id    INTEGER NOT NULL,                  -- the post this reply belongs to
+  name       TEXT,                              -- optional display name
+  email      TEXT    NOT NULL,                  -- required, never shown publicly
+  message    TEXT    NOT NULL,
+  created_at INTEGER NOT NULL                   -- unix seconds
+);
+
+CREATE INDEX IF NOT EXISTS idx_replies_post ON replies (post_id, created_at);

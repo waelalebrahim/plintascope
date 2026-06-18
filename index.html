@@ -186,6 +186,16 @@
     padding:3px 10px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;}
   .bp-vote:hover{border-color:var(--teal);color:var(--teal-dark);}
   .bp-vote.voted{color:var(--teal-dark);border-color:var(--teal);background:var(--teal-soft);cursor:default;}
+  .bp-replytoggle{margin-top:8px;margin-left:8px;border:none;background:none;color:var(--sub);font:inherit;font-size:12px;cursor:pointer;padding:3px 2px;}
+  .bp-replytoggle:hover{color:var(--teal-dark);text-decoration:underline;}
+  .bp-replies{margin-top:9px;display:flex;flex-direction:column;gap:7px;}
+  .bp-reply{border-left:2px solid var(--border);padding:2px 0 2px 10px;margin-left:3px;}
+  .bp-rtop{display:flex;align-items:center;gap:8px;}
+  .bp-rmsg{font-size:12.5px;line-height:1.45;color:var(--ink);white-space:pre-wrap;word-break:break-word;margin-top:2px;}
+  .bp-replyform{margin-top:9px;display:flex;flex-direction:column;gap:6px;}
+  .bp-replyform input,.bp-replyform textarea{font:inherit;width:100%;border:1px solid var(--border);border-radius:8px;padding:7px 9px;background:var(--card);color:var(--ink);}
+  .bp-replyform textarea{resize:vertical;}
+  .rf-status{font-size:11.5px;}
 </style>
 </head>
 <body>
@@ -1122,23 +1132,72 @@ function boardCloseFn(){
   document.getElementById("boardPanel").setAttribute("aria-hidden","true");
   document.getElementById("boardBackdrop").classList.remove("show");
 }
+function replyHTML(r){
+  return '<div class="bp-reply"><div class="bp-rtop"><span class="bp-who">'+esc(r.name||"Anonymous")+'</span>'+
+    '<span class="bp-time">'+timeAgo(r.created_at)+'</span></div>'+
+    '<div class="bp-rmsg">'+esc(r.message)+'</div></div>';
+}
 function boardRender(posts){
   var voted=boardVotedSet(), list=document.getElementById("bpList");
   if(!posts.length){ list.innerHTML='<div class="bp-empty">No posts yet. Be the first to share an idea.</div>'; return; }
+  var savedEmail="", savedName="";
+  try{ savedEmail=localStorage.getItem("ps_board_email")||""; savedName=localStorage.getItem("ps_board_name")||""; }catch(e){}
   var html="";
   posts.forEach(function(p){
     var did=voted.indexOf(p.id)>=0, fb=p.type==="feedback";
-    html+='<div class="bp-item"><div class="bp-itop">'+
+    var reps=(p.replies||[]).map(replyHTML).join("");
+    html+='<div class="bp-item" data-pid="'+p.id+'"><div class="bp-itop">'+
       '<span class="bp-chip'+(fb?" fb":"")+'">'+(fb?"Feedback":"Idea")+'</span>'+
       '<span class="bp-who">'+esc(p.name||"Anonymous")+'</span>'+
       '<span class="bp-time">'+timeAgo(p.created_at)+'</span></div>'+
       '<div class="bp-msg">'+esc(p.message)+'</div>'+
-      '<button class="bp-vote'+(did?" voted":"")+'" data-id="'+p.id+'"'+(did?" disabled":"")+'>&#9650; <span>'+p.votes+'</span></button></div>';
+      '<button class="bp-vote'+(did?" voted":"")+'" data-id="'+p.id+'"'+(did?" disabled":"")+'>&#9650; <span>'+p.votes+'</span></button>'+
+      '<button class="bp-replytoggle" data-id="'+p.id+'">Reply</button>'+
+      '<div class="bp-replies">'+reps+'</div>'+
+      '<div class="bp-replyform" hidden>'+
+        '<input class="rf-name" type="text" placeholder="Name (optional)" maxlength="40" value="'+esc(savedName)+'" />'+
+        '<input class="rf-email" type="email" placeholder="Email (required, not shown)" autocomplete="email" value="'+esc(savedEmail)+'" />'+
+        '<textarea class="rf-msg" rows="2" placeholder="Write a reply\u2026" maxlength="1000"></textarea>'+
+        '<input class="rf-hp bp-hp" tabindex="-1" autocomplete="off" aria-hidden="true" />'+
+        '<div class="bp-actions"><button class="rf-send" type="button" data-id="'+p.id+'">Reply</button><span class="rf-status"></span></div>'+
+      '</div></div>';
   });
   list.innerHTML=html;
   Array.prototype.forEach.call(list.querySelectorAll(".bp-vote:not(.voted)"),function(btn){
     btn.addEventListener("click",function(){ boardVote(parseInt(btn.getAttribute("data-id"),10), btn); });
   });
+  Array.prototype.forEach.call(list.querySelectorAll(".bp-replytoggle"),function(btn){
+    btn.addEventListener("click",function(){
+      var item=btn.parentNode, form=item.querySelector(".bp-replyform");
+      if(form.hasAttribute("hidden")){ form.removeAttribute("hidden"); var t=form.querySelector(".rf-msg"); if(t) t.focus(); btn.textContent="Cancel"; }
+      else { form.setAttribute("hidden",""); btn.textContent="Reply"; }
+    });
+  });
+  Array.prototype.forEach.call(list.querySelectorAll(".rf-send"),function(btn){
+    btn.addEventListener("click",function(){ boardReply(parseInt(btn.getAttribute("data-id"),10), btn); });
+  });
+}
+function boardReply(id, btn){
+  var item=btn.parentNode.parentNode; // .bp-replyform
+  var name=item.querySelector(".rf-name").value.trim();
+  var email=item.querySelector(".rf-email").value.trim();
+  var msg=item.querySelector(".rf-msg").value.trim();
+  var hp=item.querySelector(".rf-hp").value;
+  var st=item.querySelector(".rf-status");
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ st.textContent="Enter a valid email."; st.style.color="var(--down)"; return; }
+  if(msg.length<3){ st.textContent="Write a little more."; st.style.color="var(--down)"; return; }
+  st.textContent="Posting\u2026"; st.style.color="var(--sub)";
+  fetch("/api/board",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({reply_to:id,email:email,message:msg,name:name,hp:hp})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d && d.ok && d.reply){
+        try{ localStorage.setItem("ps_board_email",email); localStorage.setItem("ps_board_name",name); }catch(e){}
+        var post=item.parentNode; // .bp-item
+        var reps=post.querySelector(".bp-replies");
+        reps.insertAdjacentHTML("beforeend", replyHTML(d.reply));
+        item.querySelector(".rf-msg").value="";
+        st.textContent="Replied. Thank you."; st.style.color="var(--teal-dark)";
+      } else { st.textContent=(d&&d.error)?d.error:"Couldn't reply."; st.style.color="var(--down)"; }
+    }).catch(function(){ st.textContent="Couldn't reply."; st.style.color="var(--down)"; });
 }
 function boardLoad(){
   var list=document.getElementById("bpList");

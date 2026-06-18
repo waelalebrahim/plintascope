@@ -110,6 +110,7 @@
   .panel .h{font-size:11.5px;color:var(--sub);margin-bottom:6px;}
   .rsihead{display:flex;justify-content:space-between;align-items:center;}
   .rsival{font-weight:600;}
+  .adrrow{font-size:12px;color:var(--sub);margin-top:7px;}
   .meter{height:6px;border-radius:6px;background:var(--grid);margin:8px 0;overflow:hidden;}
   .meter span{display:block;height:6px;border-radius:6px;}
   .state{font-size:14px;font-weight:600;}
@@ -137,6 +138,11 @@
   .popup .ttl{font-weight:600;margin-bottom:4px;}
   .popup .meta{font-size:12px;color:var(--sub);display:flex;gap:12px;flex-wrap:wrap;margin-bottom:9px;}
   .popup .body{font-size:13px;}
+  .popup .body p{margin:0 0 7px;line-height:1.5;}
+  .popup .body p:last-child{margin-bottom:0;}
+  .popup .pl-why{color:var(--sub);}
+  .popup .pl-watch{font-weight:600;}
+  .popup .pl-note{color:var(--sub);font-size:12px;}
 
   footer.credit{margin-top:30px;border-top:1px solid var(--border);padding-top:20px;}
   .osnote{background:var(--teal-soft);border:1px solid var(--teal);border-radius:11px;padding:13px 15px;
@@ -298,6 +304,7 @@
     <div class="rail">
       <div class="card panel" id="readPanel"></div>
       <div class="card panel" id="rsiPanel"></div>
+      <div class="card panel" id="adrPanel"></div>
       <div class="card panel">
         <div class="h">Major levels, strongest first</div>
         <div class="lvls" id="lvls"></div>
@@ -372,25 +379,96 @@ var BASE_OPTS = [
 
 var IMPACT_COLOR = { high:"#d64545", med:"#d99b1f", low:"#3f9d6b", holiday:"#9aa7a3" };
 
+var PLACE = {
+  USD:"the US", EUR:"the Euro area", GBP:"the UK", JPY:"Japan", AUD:"Australia",
+  NZD:"New Zealand", CAD:"Canada", CHF:"Switzerland", CNY:"China", HKD:"Hong Kong",
+  SGD:"Singapore", KRW:"South Korea", INR:"India", TWD:"Taiwan", SEK:"Sweden",
+  NOK:"Norway", DKK:"Denmark", PLN:"Poland", CZK:"Czechia", HUF:"Hungary",
+  RON:"Romania", RUB:"Russia", TRY:"Turkey", ZAR:"South Africa", MXN:"Mexico",
+  BRL:"Brazil", ILS:"Israel", SAR:"Saudi Arabia", THB:"Thailand", IDR:"Indonesia",
+  MYR:"Malaysia", PHP:"the Philippines", CLP:"Chile", COP:"Colombia"
+};
+function placeName(cur){ return PLACE[(cur||"").toUpperCase()] || "this economy"; }
+
+// Each entry: [pattern, what-it-is (uses {place}), why-traders-watch].
+// Order matters: first match wins, so specific/communication entries come first.
 var EXPLAIN = [
-  [/non.?farm|nfp|payroll|employment change/i, "Jobs data, one of the biggest scheduled movers for the currency. Expect sharp moves."],
-  [/cpi|inflation|consumer price/i, "Inflation. Hotter-than-forecast readings usually raise rate-hike talk, which markets watch closely."],
-  [/\bgdp\b/i, "Overall growth, a broad health check on the economy."],
-  [/rate|fomc|monetary policy|cash rate|policy statement/i, "Central-bank interest-rate decision, the biggest scheduled driver for a currency."],
-  [/pmi|purchasing managers/i, "Business activity survey, a forward-looking read on the economy."],
-  [/unemployment|jobless|claims/i, "Labour-market health, watched for the central bank's next move."],
-  [/retail sales/i, "Consumer spending, a read on demand in the economy."],
-  [/speaks|speech|press conference|testimony|conference/i, "An official speaking. Wording can move the market even with no data attached."]
+  [/pce/i,
+    "The Fed's preferred inflation gauge for {place}.",
+    "Because the Fed leans on it most, it carries extra weight for the dollar."],
+  [/speech|speaks|press conference|testimony|\bminutes\b|summary of opinions|beige book|monetary policy report|rate statement/i,
+    "An official from {place} speaking, or the notes from a recent policy meeting.",
+    "No fresh data here, but the tone and wording can shift what traders expect from the central bank, which moves markets on its own."],
+  [/interest rate decision|rate decision|\bfomc\b|monetary policy statement|monetary policy|cash rate|bank rate|repo rate|\bmpc\b|prime rate|interest rate projection/i,
+    "{place}'s central bank setting its main interest rate.",
+    "This is the rate almost everything else is priced off, so it's usually the single biggest scheduled driver for a currency."],
+  [/cpi|inflation|consumer price|hicp|harmonised/i,
+    "How fast prices are rising in {place}.",
+    "Inflation is the main thing central banks target, so it feeds directly into whether they raise or cut interest rates."],
+  [/ppi|producer price|wholesale price/i,
+    "How fast prices are rising for {place}'s producers and factories.",
+    "Factory-gate prices often feed into consumer inflation later, so traders treat it as an early clue."],
+  [/non.?farm|\bnfp\b|payroll|employment change/i,
+    "How many jobs {place} added or lost last month.",
+    "The strength of the jobs market feeds into rate decisions, so surprises here often move the currency."],
+  [/earnings|wage|labour cost|labor cost/i,
+    "How fast pay is growing in {place}.",
+    "Faster pay growth can push inflation up, so central banks watch it closely."],
+  [/unemployment|jobless|claimant|participation rate/i,
+    "The share of people in {place} who want work but can't find it.",
+    "Joblessness is a core gauge of economic health and feeds into rate decisions."],
+  [/\bgdp\b|gross domestic product/i,
+    "The total size of {place}'s economy, and whether it grew or shrank.",
+    "It's the broadest single measure of whether the economy is expanding or contracting."],
+  [/retail sales/i,
+    "How much shoppers spent in {place} last month.",
+    "Consumer spending is a large share of the economy, so it signals underlying demand."],
+  [/\bpmi\b|purchasing managers|\bism\b/i,
+    "A survey of {place}'s businesses on how things are going right now.",
+    "Surveys tend to move ahead of the official data, so traders treat them as a forward look."],
+  [/balance of trade|trade balance|\bexports\b|\bimports\b/i,
+    "The gap between what {place} exports and imports.",
+    "A country's trade flows affect demand for its currency."],
+  [/consumer confidence|consumer sentiment|consumer expectations|michigan/i,
+    "How optimistic households in {place} feel about the economy.",
+    "How people feel tends to lead how much they go on to spend."],
+  [/business confidence|business climate|\bifo\b|\bzew\b|tankan|business optimism|economic sentiment|sentix|nab business|business outlook/i,
+    "How optimistic businesses in {place} feel about the economy.",
+    "Business mood tends to lead hiring and investment."],
+  [/industrial production|manufacturing production|factory orders|durable goods|machine tool|machinery orders|capacity utilization/i,
+    "How much {place}'s factories and industry are producing or ordering.",
+    "A read on the production and investment side of the economy."],
+  [/housing|home sales|house price|building permits|\bnahb\b|pending home|residential property|construction output|construction pmi/i,
+    "Activity in {place}'s housing and construction sector.",
+    "Housing is very sensitive to interest rates, so it shows how the economy is responding to them."],
+  [/mortgage|\bmba\b/i,
+    "Weekly mortgage activity in {place}.",
+    "A timely but minor read on housing demand."],
+  [/money supply|\bm2\b|\bm3\b|\bm4\b|credit growth|loan growth|private sector credit/i,
+    "How much money and credit is circulating in {place}.",
+    "A slower-moving backdrop indicator rather than a sharp mover."],
+  [/current account/i,
+    "The overall flow of money in and out of {place}.",
+    "A broad tally of the country's financial position with the rest of the world."],
+  [/crude oil|\beia\b|\bapi\b|gasoline stocks|natural gas stocks|oil rig/i,
+    "Weekly change in US energy stockpiles.",
+    "Mainly a driver for oil and gas prices rather than currencies."],
+  [/auction|bill auction|note auction|bond auction|bubill|\bgilt\b|\bjgb\b|\bbtf\b/i,
+    "A government debt sale in {place}.",
+    "Usually a technical, minor event for most traders."],
+  [/car sales|vehicle|auto sales|auto production/i,
+    "New vehicle sales in {place}.",
+    "A read on big-ticket consumer spending."]
 ];
 function explainFor(title){
-  for(var i=0;i<EXPLAIN.length;i++){ if(EXPLAIN[i][0].test(title)) return EXPLAIN[i][1]; }
-  return "";
+  for(var i=0;i<EXPLAIN.length;i++){ if(EXPLAIN[i][0].test(title)) return { what:EXPLAIN[i][1], why:EXPLAIN[i][2]||"" }; }
+  return { what:"", why:"" };
 }
 
 var state = {
   symbol:"EUR/USD", baseTf:"30m", baseInterval:"30min",
   live:false, candles:[], closes:[],
-  rsi:50, levels:[], strip:[], verdict:"",
+  rsi:50, levels:[], strip:[], verdict:"", adr:null,
   events:[], selectedNews:null,
   htf:{ D:[], H4:[] },
   fvg:[], fvgHTF:[], showFVG:true,
@@ -718,7 +796,7 @@ function positionFVG(){
 }
 
 /* ---------- candle reader (drag to select a group) ---------- */
-function pipSize(){ return state.dec>=4 ? 0.0001 : (state.dec===2 ? 0.01 : Math.pow(10,-(state.dec-2))); }
+function pipSize(){ return state.dec>=4 ? 0.0001 : 0.01; }
 
 function describeCandles(a,b){
   var cs=state.candles.slice(a,b+1), m=cs.length;
@@ -916,12 +994,12 @@ function loadStrip(sym){
     state.strip = results.map(function(r){ return { tf:r.tf, dir:r.dir }; });
     var htfg=[];
     results.forEach(function(r){
-      if(r.tf==="D"  && r.candles){ state.htf.D  = srCandidates(r.candles).levels; detectFVG(r.candles).forEach(function(f){ f.tf="D";  htfg.push(f); }); }
+      if(r.tf==="D"  && r.candles){ state.htf.D  = srCandidates(r.candles).levels; state.adr=computeADR(r.candles); detectFVG(r.candles).forEach(function(f){ f.tf="D";  htfg.push(f); }); }
       if(r.tf==="4H" && r.candles){ state.htf.H4 = srCandidates(r.candles).levels; detectFVG(r.candles).forEach(function(f){ f.tf="4H"; htfg.push(f); }); }
     });
     state.fvgHTF=htfg;
     buildVerdict(); renderStrip();
-    computeFinalLevels(); drawLevels(); renderLevels(); positionFVG();
+    computeFinalLevels(); drawLevels(); renderLevels(); positionFVG(); renderADR();
   });
 }
 
@@ -933,7 +1011,7 @@ function computeIndicators(){
 
 function load(){
   var sym = state.symbol;
-  state.readSel=null;
+  state.readSel=null; state.adr=null;
   setBanner("loading");
   getTF(sym, state.baseInterval, 500).then(function(base){
     if(base.candles && base.candles.length>20){
@@ -944,7 +1022,7 @@ function load(){
       state.selectedNews=null; renderPopup();
       computeIndicators();
       drawChart(true);
-      renderRSI(); renderLevels();
+      renderRSI(); renderLevels(); renderADR();
       state.lastUpdated=new Date(); setBanner("live");
       loadStrip(sym); startAuto();
     } else {
@@ -956,14 +1034,14 @@ function load(){
 function useSample(code){
   stopAuto();
   state.live=false;
-  state.htf={ D:[], H4:[] }; state.fvgHTF=[];
+  state.htf={ D:[], H4:[] }; state.fvgHTF=[]; state.adr=null;
   state.candles=generateCandles();
   state.closes=state.candles.map(function(c){return c.c;});
   state.dec=5;
   state.selectedNews=null; renderPopup();
   computeIndicators();
   drawChart(true);
-  renderRSI(); renderLevels();
+  renderRSI(); renderLevels(); renderADR();
   var dir30=trendDir(state.closes);
   state.strip=[{tf:"D",dir:"up"},{tf:"4H",dir:"up"},{tf:"30m",dir:dir30},
                {tf:"15m",dir:"flat"},{tf:"5m",dir:"down"},{tf:"1m",dir:"down"}];
@@ -1058,6 +1136,40 @@ function renderRSI(){
     '<div class="note"><span>&#9888;</span><span>A condition, not a signal. In a strong trend, price can stay stretched and keep going.</span></div>';
 }
 
+// Average Daily Range: today's range vs the recent daily average. Pure
+// measurement, deliberately no verdict word and one neutral meter colour.
+function computeADR(daily){
+  if(!daily || daily.length<2) return null;
+  var ps=pipSize();
+  var last=daily[daily.length-1];
+  var todayPips=Math.round((((last.h-last.l)||0))/ps);
+  var prev=daily.slice(Math.max(0,daily.length-15), daily.length-1); // up to 14 completed days
+  if(!prev.length) return null;
+  var sum=0; prev.forEach(function(c){ sum+=(c.h-c.l); });
+  var avgPips=Math.round((sum/prev.length)/ps);
+  if(!avgPips) return null;
+  return { today:todayPips, avg:avgPips, pct:(todayPips/avgPips)*100 };
+}
+function renderADR(){
+  var el=document.getElementById("adrPanel"); if(!el) return;
+  var a=state.adr;
+  if(!a || !a.avg){
+    el.innerHTML='<div class="rsihead"><span class="h" style="margin:0">Day\u2019s range</span><span class="rsival mono">&mdash;</span></div>'+
+      '<div class="note" style="margin-top:6px"><span>&#8505;</span><span>How much of a typical day\u2019s range is used shows once live daily data loads.</span></div>';
+    return;
+  }
+  var pct=Math.round(a.pct);
+  var w=Math.max(2, Math.min(100, pct));
+  var caveat = pct>=100
+    ? "Today\u2019s range is already past the recent daily average. A measurement, not a signal \u2014 strong trends often run well past it."
+    : "A measurement, not a signal \u2014 it says how far price has travelled today, not where it goes next.";
+  el.innerHTML=
+    '<div class="rsihead"><span class="h" style="margin:0">Day\u2019s range</span><span class="rsival mono">'+pct+'%</span></div>'+
+    '<div class="meter"><span style="width:'+w+'%;background:var(--teal)"></span></div>'+
+    '<div class="adrrow mono">'+a.today+'p today \u00b7 '+a.avg+'p 14-day avg</div>'+
+    '<div class="note"><span>&#8505;</span><span>'+caveat+'</span></div>';
+}
+
 function renderLevels(){
   var box=document.getElementById("lvls"); box.innerHTML="";
   state.levels.forEach(function(lv){
@@ -1075,19 +1187,27 @@ function renderPopup(){
   if(state.selectedNews==null || !state.events[state.selectedNews]){ p.innerHTML=""; p.style.display="none"; return; }
   var ev=state.events[state.selectedNews], col=impactColor(ev.impact);
   var im=(ev.impact||"").toLowerCase();
-  var note = im==="high" ? "High impact: expect volatility around this time. PlintaScope flags it, it does not predict direction."
+  var place=placeName(ev.currency);
+  var ex=explainFor(ev.title);
+  var whatTxt=(ex.what||"A scheduled economic release for {place}.").replace(/\{place\}/g, place);
+  var whyTxt=(ex.why||"").replace(/\{place\}/g, place);
+  var hasF=ev.forecast!==""&&ev.forecast!=null&&!isNaN(parseFloat(ev.forecast));
+  var surprise=hasF ? "Watch the Actual against the Forecast \u2014 the surprise, not the number itself, is what tends to move the market, and it can go either way." : "";
+  var note = im==="high" ? "High impact: bigger, faster moves are likely around this time. PlintaScope only flags it \u2014 it never predicts direction."
            : im==="medium" ? "Medium impact: can stir some movement."
            : im==="low" ? "Low impact: usually a minor mover on its own."
-           : "Scheduled event.";
-  var meaning=explainFor(ev.title);
-  var body=(meaning?meaning+" ":"")+note;
+           : "";
+  var lines='<p class="pl-what">'+esc(whatTxt)+'</p>';
+  if(whyTxt) lines+='<p class="pl-why">'+esc(whyTxt)+'</p>';
+  if(surprise) lines+='<p class="pl-watch">'+esc(surprise)+'</p>';
+  if(note) lines+='<p class="pl-note">'+esc(note)+'</p>';
   p.style.display="block"; p.className="popup";
   p.innerHTML=
     '<div class="ptop"><span class="imp" style="color:'+col+'"><span class="d" style="background:'+col+'"></span>'+esc(ev.impact||"event")+'</span>'+
     '<button class="x" aria-label="Close" id="popX">&times;</button></div>'+
     '<div class="ttl">'+esc(ev.currency)+" \u00b7 "+esc(ev.title)+'</div>'+
     '<div class="meta mono"><span>'+fmtEventTime(ev.t)+'</span><span>F: '+esc(ev.forecast||"n/a")+'</span><span>Prev: '+esc(ev.previous||"n/a")+'</span>'+(ev.actual?'<span>Act: '+esc(ev.actual)+'</span>':'')+'</div>'+
-    '<div class="body">'+esc(body)+'</div>';
+    '<div class="body">'+lines+'</div>';
   document.getElementById("popX").addEventListener("click",function(){ state.selectedNews=null; renderPopup(); });
 }
 

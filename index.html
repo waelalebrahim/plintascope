@@ -281,6 +281,8 @@
 
   <div id="banner" class="banner sample"><span class="dot" style="background:var(--amber)"></span><span id="bannerText">Loading&#8230;</span></div>
 
+  <div id="conditions" style="display:none;align-items:flex-start;gap:9px;padding:11px 14px;margin-bottom:10px;border:1px solid #e3c9b6;border-left:3px solid var(--amber);border-radius:6px;background:#faf3ec;font-size:14px;line-height:1.5;color:#5f5043;"></div>
+
   <div class="card strip">
     <div class="tfrow" id="tfrow"></div>
     <div class="verdict" id="verdict"></div>
@@ -643,6 +645,17 @@ function getTF(symbol, interval, outputsize){
 function decimalsFor(price){ return price<10 ? 5 : (price<1000 ? 3 : 2); }
 function fmtPrice(p){ return p.toFixed(state.dec); }
 function fmtClock(d){ return [d.getHours(),d.getMinutes(),d.getSeconds()].map(function(x){return String(x).padStart(2,"0");}).join(":"); }
+// Display-only local-time formatters for the chart. Data stays UTC underneath (so the
+// news dots, FVG and levels remain aligned); we only translate what the eye reads. JS
+// Date's get* methods return the viewer's local browser timezone automatically.
+var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function localStamp(ts){ var d=new Date(ts*1000); var p=function(n){return String(n).padStart(2,"0");};
+  return d.getDate()+" "+MON[d.getMonth()]+" '"+String(d.getFullYear()).slice(2)+"  "+p(d.getHours())+":"+p(d.getMinutes()); }
+function localTick(ts, tickType){ var d=new Date(ts*1000); var p=function(n){return String(n).padStart(2,"0");};
+  if(tickType>=3) return p(d.getHours())+":"+p(d.getMinutes()); // time ticks
+  if(tickType===2) return d.getDate()+" "+MON[d.getMonth()];     // day
+  if(tickType===1) return MON[d.getMonth()];                     // month
+  return String(d.getFullYear()); }                              // year
 function fmtEventTime(t){
   var d=new Date(t*1000);
   var wd=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
@@ -664,7 +677,8 @@ function ensureChart(){
     autoSize:true,
     layout:{ background:{type:"solid", color:"#ffffff"}, textColor:"#5f7470", fontFamily:"-apple-system,Segoe UI,Roboto,sans-serif" },
     grid:{ vertLines:{color:"#f0efe9"}, horzLines:{color:"#f0efe9"} },
-    timeScale:{ timeVisible:true, secondsVisible:false, borderColor:"#e7e4dc", rightOffset:6 },
+    localization:{ timeFormatter: localStamp },
+    timeScale:{ timeVisible:true, secondsVisible:false, borderColor:"#e7e4dc", rightOffset:6, tickMarkFormatter: localTick },
     rightPriceScale:{ borderColor:"#e7e4dc" },
     crosshair:{ mode:LightweightCharts.CrosshairMode.Normal }
   });
@@ -689,6 +703,18 @@ function intervalSeconds(){
   return m[state.baseInterval] || 1800;
 }
 
+// Show all real candles plus a small future margin, instead of fitting the long
+// whitespace tail (which left a big empty band on the right). The whitespace bars
+// still exist so the user can scroll right for upcoming news.
+function fitToData(){
+  if(!chart) return;
+  if(!state.candles.length){ chart.timeScale().fitContent(); return; }
+  var step=intervalSeconds();
+  var first=state.candles[0].time;
+  var last=state.candles[state.candles.length-1].time;
+  chart.timeScale().setVisibleRange({ from:first, to:last + 8*step });
+}
+
 function seriesData(){
   var data=state.candles.map(function(c){ return {time:c.time, open:c.o, high:c.h, low:c.l, close:c.c}; });
   if(state.candles.length){
@@ -705,7 +731,7 @@ function drawChart(fit){
   series.applyOptions({ priceFormat:{ type:"price", precision:dec, minMove:Math.pow(10,-dec) } });
   series.setData(seriesData());
   drawLevels();
-  if(fit) chart.timeScale().fitContent();
+  if(fit) fitToData();
   updatePriceHeader();
   updateOHLC(null);
   positionNews();
@@ -928,6 +954,7 @@ function loadCalendar(){
       state.events=d.events;
       buildNewsDots();
       positionNews();
+      renderConditions();
     }
   }).catch(function(){});
 }
@@ -1136,6 +1163,39 @@ function renderRSI(){
     '<div class="note"><span>&#9888;</span><span>A condition, not a signal. In a strong trend, price can stay stretched and keep going.</span></div>';
 }
 
+// A neutral, descriptive heads-up about the trading environment. It names WHY
+// conditions are rough (imminent high-impact news; an already-stretched range) but
+// never says safe/unsafe or enter/avoid. "A condition, not a signal" — same spirit
+// as the RSI and Day's-range notes. Reads only data the tool already has.
+function renderConditions(){
+  var el=document.getElementById("conditions"); if(!el) return;
+  var msgs=[];
+  var now=Date.now()/1000;
+  var pairCcy=(state.symbol||"").toUpperCase().split("/");
+  // 1) imminent high-impact news for a currency in the displayed pair
+  var soon=null;
+  (state.events||[]).forEach(function(ev){
+    var im=(ev.impact||"").toLowerCase();
+    if(im==="high" && ev.t>now && pairCcy.indexOf((ev.currency||"").toUpperCase())>=0){
+      var mins=(ev.t-now)/60;
+      if(mins<=60 && (soon===null || ev.t<soon.t)) soon={t:ev.t, mins:Math.round(mins), ev:ev};
+    }
+  });
+  if(soon){
+    msgs.push("High-impact news "+(soon.mins<=1?"any moment now":("in ~"+soon.mins+" min"))+
+      " ("+soon.ev.currency+" \u00b7 "+soon.ev.title+"). Around releases, spreads widen and price can whip both ways. That's volatility \u2014 not a direction.");
+  }
+  // 2) today's range already stretched vs its 14-day average
+  if(state.adr && state.adr.avg && state.adr.pct>=120){
+    msgs.push("Today\u2019s range is already "+Math.round(state.adr.pct)+"% of its 14-day average \u2014 bigger swings than usual today. Larger moves cut both ways.");
+  }
+  if(!msgs.length){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="flex";
+  el.innerHTML='<span style="flex:0 0 auto;font-size:15px;line-height:1.2">&#9888;</span>'+
+    '<span><b>Navigating volatile conditions:</b> '+msgs.join(" &nbsp;\u00b7&nbsp; ")+
+    ' <i style="opacity:.75">A heads-up about the environment, not a signal to act \u2014 the read is yours.</i></span>';
+}
+
 // Average Daily Range: today's range vs the recent daily average. Pure
 // measurement, deliberately no verdict word and one neutral meter colour.
 function computeADR(daily){
@@ -1151,6 +1211,7 @@ function computeADR(daily){
   return { today:todayPips, avg:avgPips, pct:(todayPips/avgPips)*100 };
 }
 function renderADR(){
+  renderConditions();
   var el=document.getElementById("adrPanel"); if(!el) return;
   var a=state.adr;
   if(!a || !a.avg){

@@ -1106,17 +1106,33 @@ function stopAuto(){ if(_autoTimer){ clearInterval(_autoTimer); _autoTimer=null;
 function buildVerdict(){
   var s=state.strip; if(!s.length){state.verdict="";return;}
   function dirOf(k){ var x=s.find(function(o){return o.tf===k;}); return x?x.dir:null; }
-  var higher=["D","4H","30m"].map(dirOf), lower=["15m","5m","1m"].map(dirOf);
-  function allUp(a){return a.every(function(d){return d==="up";});}
-  function allDown(a){return a.every(function(d){return d==="down";});}
-  function anyDown(a){return a.some(function(d){return d==="down";});}
-  function anyUp(a){return a.some(function(d){return d==="up";});}
+  var dirs=s.map(function(o){return o.dir;});
+  var up=dirs.filter(function(d){return d==="up";}).length;
+  var down=dirs.filter(function(d){return d==="down";}).length;
+  var n=dirs.length, flat=n-up-down;
+  // The structural (higher) timeframes carry the most weight for context.
+  var hi=["D","4H"].map(dirOf);
+  var hUp=hi.filter(function(d){return d==="up";}).length;
+  var hDown=hi.filter(function(d){return d==="down";}).length;
+
   var msg;
-  if(allUp(higher)&&anyDown(lower)) msg="Higher timeframes up, lower ones pulling back. Reads like a dip inside an uptrend, not a reversal, but that's your call.";
-  else if(allDown(higher)&&anyUp(lower)) msg="Higher timeframes down, lower ones bouncing. Looks like a pullback inside a downtrend. Your call to make.";
-  else if(allUp(higher)&&allUp(lower)) msg="All timeframes pointing up, fully aligned with the trend. The strongest kind of backdrop, not a guarantee.";
-  else if(allDown(higher)&&allDown(lower)) msg="All timeframes pointing down, fully aligned to the downside. Strong backdrop, not a guarantee.";
-  else msg="Timeframes are mixed right now. No clean alignment, so there's no obvious with-trend read here.";
+  if(flat>=n-1){
+    msg="Almost everything is flat right now \u2014 quiet, range-bound conditions. No real trend to lean on.";
+  } else if(up===n){
+    msg="Every timeframe is pointing up, fully aligned with the trend. The strongest kind of backdrop \u2014 still not a guarantee.";
+  } else if(down===n){
+    msg="Every timeframe is pointing down, fully aligned to the downside. Strong backdrop \u2014 still not a guarantee.";
+  } else if(hUp===2 && down>=1){
+    msg="Higher timeframes are up while a lower one pulls back. Reads like a dip inside an uptrend, not a reversal \u2014 your call.";
+  } else if(hDown===2 && up>=1){
+    msg="Higher timeframes are down while a lower one bounces. Looks like a pullback inside a downtrend \u2014 your call.";
+  } else if(up>=down+2 && hDown===0){
+    msg="Most timeframes are leaning up"+(flat?", a few flat":"")+". The backdrop tilts to the upside \u2014 not a guarantee, and your read to make.";
+  } else if(down>=up+2 && hUp===0){
+    msg="Most timeframes are leaning down"+(flat?", a few flat":"")+". The backdrop tilts to the downside \u2014 not a guarantee, your read to make.";
+  } else {
+    msg="Timeframes are mixed right now \u2014 some up, some down. No clean alignment, so there's no obvious with-trend read here.";
+  }
   state.verdict=msg;
 }
 
